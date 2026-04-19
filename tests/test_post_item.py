@@ -5,6 +5,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
+import allure
 import pytest
 
 from api_client import AvitoApiClient
@@ -69,13 +70,33 @@ def _create_and_get_item(
     assert item is not None
     return item_id, create_body, item
 
+
+def _attach_json(name: str, data: Any) -> None:
+    allure.attach(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        name=name,
+        attachment_type=allure.attachment_type.JSON,
+    )
+
+
+@allure.title("1.1.1 Создание валидного объявления")
+@allure.description("Проверка успешного создания объявления и базового контракта через GET по ID.")
 def test_1_1_1_create_valid_item(api_client: AvitoApiClient, item_payload_factory: Callable[..., dict[str, Any]]) -> None:
     payload = item_payload_factory(price=1000, likes=1, view_count=10, contacts=1)
 
-    _, create_body, item = _create_and_get_item(api_client, payload)
+    with allure.step("Подготовить валидный payload"):
+        _attach_json("payload", payload)
 
-    assert "status" in create_body
-    _assert_create_schema(item)
+    with allure.step("Создать объявление и получить объект через GET"):
+        _, create_body, item = _create_and_get_item(api_client, payload)
+        _attach_json("create_response", create_body)
+        _attach_json("item_from_get", item)
+
+    with allure.step("Проверить, что в ответе create есть status"):
+        assert "status" in create_body
+
+    with allure.step("Проверить схему объекта объявления"):
+        _assert_create_schema(item)
 
 def test_1_1_2_create_response_contract(api_client: AvitoApiClient, item_payload_factory: Callable[..., dict[str, Any]]) -> None:
     payload = item_payload_factory(price=1000, likes=1, view_count=10, contacts=1)
@@ -243,15 +264,24 @@ def test_1_4_1_non_idempotent_duplicate_posts(
 ) -> None:
     payload = item_payload_factory(price=1000, likes=1, view_count=10, contacts=1)
 
-    first = api_client.create_item(payload)
-    second = api_client.create_item(payload)
+    with allure.step("Отправить первый POST с одинаковым payload"):
+        first = api_client.create_item(payload)
+        _attach_json("first_create_response", first.json())
 
-    assert first.status_code == 200, first.text
-    assert second.status_code == 200, second.text
+    with allure.step("Отправить второй POST с таким же payload"):
+        second = api_client.create_item(payload)
+        _attach_json("second_create_response", second.json())
+
+    with allure.step("Проверить успешные статусы обоих запросов"):
+        assert first.status_code == 200, first.text
+        assert second.status_code == 200, second.text
 
     first_id = _extract_id_from_create_response(first.json())
     second_id = _extract_id_from_create_response(second.json())
-    assert first_id != second_id
+    with allure.step("Проверить, что ID различаются (неидемпотентность POST)"):
+        allure.attach(first_id, name="first_id", attachment_type=allure.attachment_type.TEXT)
+        allure.attach(second_id, name="second_id", attachment_type=allure.attachment_type.TEXT)
+        assert first_id != second_id
 
 def test_1_4_2_unique_ids_for_multiple_creates(
     api_client: AvitoApiClient,
@@ -309,21 +339,30 @@ def test_2_1_1_get_existing_item(api_client: AvitoApiClient, created_item: dict[
     assert matched is not None
     assert REQUIRED_TOP_LEVEL_FIELDS.issubset(matched.keys())
 
+@allure.title("2.1.2 Сквозная консистентность POST == GET")
+@allure.description("После создания объявления проверяем, что GET /item/:id возвращает те же данные.")
 def test_2_1_2_post_get_consistency(api_client: AvitoApiClient, created_item: dict[str, Any]) -> None:
     payload = created_item["payload"]
     item_id = created_item["id"]
 
-    response = api_client.get_item_by_id(item_id)
+    with allure.step("Взять данные созданного объявления из фикстуры"):
+        _attach_json("created_payload", payload)
+        allure.attach(item_id, name="created_item_id", attachment_type=allure.attachment_type.TEXT)
 
-    assert response.status_code == 200, response.text
-    items = response.json()
+    with allure.step("Получить объявление по ID"):
+        response = api_client.get_item_by_id(item_id)
+        assert response.status_code == 200, response.text
+        items = response.json()
+        _attach_json("get_item_by_id_response", items)
+
     target = _find_by_id(items, item_id)
-    assert target is not None
-
-    assert target["name"] == payload["name"]
-    assert target["price"] == payload["price"]
-    assert target["sellerId"] == payload["sellerID"]
-    assert target["statistics"] == payload["statistics"]
+    with allure.step("Найти нужный объект в массиве и сверить поля"):
+        assert target is not None
+        _attach_json("target_item", target)
+        assert target["name"] == payload["name"]
+        assert target["price"] == payload["price"]
+        assert target["sellerId"] == payload["sellerID"]
+        assert target["statistics"] == payload["statistics"]
 
 def test_2_2_1_non_existing_id_returns_404(api_client: AvitoApiClient) -> None:
     response = api_client.get_item_by_id(str(uuid.uuid4()))
@@ -409,27 +448,38 @@ def test_4_1_1_statistic_contract(api_client: AvitoApiClient, created_item: dict
         assert isinstance(row["viewCount"], int)
         assert isinstance(row["contacts"], int)
 
+@allure.title("4.1.2 Консистентность статистики")
+@allure.description("Проверяем, что хотя бы один элемент статистики совпадает с переданным при создании объявления.")
 def test_4_1_2_statistic_consistency(api_client: AvitoApiClient, created_item: dict[str, Any]) -> None:
     payload_stats = created_item["payload"]["statistics"]
     item_id = created_item["id"]
 
-    response = api_client.get_statistic_by_id(item_id)
-    assert response.status_code == 200, response.text
+    with allure.step("Подготовить ожидаемую статистику"):
+        _attach_json("expected_statistics", payload_stats)
+        allure.attach(item_id, name="item_id", attachment_type=allure.attachment_type.TEXT)
 
-    stats = response.json()
+    with allure.step("Запросить статистику по ID объявления"):
+        response = api_client.get_statistic_by_id(item_id)
+        assert response.status_code == 200, response.text
+        stats = response.json()
+        _attach_json("statistics_response", stats)
+
     found = any(
         row.get("likes") == payload_stats["likes"]
         and row.get("viewCount") == payload_stats["viewCount"]
         and row.get("contacts") == payload_stats["contacts"]
         for row in stats
     )
-    assert found
+    with allure.step("Проверить совпадение ожидаемой статистики хотя бы в одном элементе"):
+        assert found
 
 def test_4_2_1_statistic_non_existing_id(api_client: AvitoApiClient) -> None:
     response = api_client.get_statistic_by_id(str(uuid.uuid4()))
     assert response.status_code == 404
 
 @pytest.mark.e2e
+@allure.title("E2E-1 Полный жизненный цикл объявления")
+@allure.description("POST -> GET by id -> GET statistic -> GET by seller, проверка целостности данных.")
 def test_e2e_1_full_lifecycle(
     api_client: AvitoApiClient,
     item_payload_factory: Callable[..., dict[str, Any]],
@@ -444,32 +494,46 @@ def test_e2e_1_full_lifecycle(
         view_count=100,
         contacts=5,
     )
+    with allure.step("Подготовить E2E payload"):
+        _attach_json("e2e_payload", payload)
 
-    item_id, _, _ = _create_and_get_item(api_client, payload)
+    with allure.step("Создать объявление и получить item_id"):
+        item_id, create_body, _ = _create_and_get_item(api_client, payload)
+        _attach_json("e2e_create_response", create_body)
+        allure.attach(item_id, name="e2e_item_id", attachment_type=allure.attachment_type.TEXT)
 
-    get_by_id = api_client.get_item_by_id(item_id)
-    assert get_by_id.status_code == 200, get_by_id.text
-    by_id_target = _find_by_id(get_by_id.json(), item_id)
-    assert by_id_target is not None
-    assert by_id_target["name"] == payload["name"]
-    assert by_id_target["price"] == payload["price"]
-    assert by_id_target["sellerId"] == seller_id
+    with allure.step("Проверить GET /api/1/item/:id"):
+        get_by_id = api_client.get_item_by_id(item_id)
+        assert get_by_id.status_code == 200, get_by_id.text
+        by_id_items = get_by_id.json()
+        _attach_json("e2e_get_by_id_response", by_id_items)
+        by_id_target = _find_by_id(by_id_items, item_id)
+        assert by_id_target is not None
+        assert by_id_target["name"] == payload["name"]
+        assert by_id_target["price"] == payload["price"]
+        assert by_id_target["sellerId"] == seller_id
 
-    get_stats = api_client.get_statistic_by_id(item_id)
-    assert get_stats.status_code == 200, get_stats.text
-    stat_found = any(
-        row.get("likes") == payload["statistics"]["likes"]
-        and row.get("viewCount") == payload["statistics"]["viewCount"]
-        and row.get("contacts") == payload["statistics"]["contacts"]
-        for row in get_stats.json()
-    )
-    assert stat_found
+    with allure.step("Проверить GET /api/1/statistic/:id"):
+        get_stats = api_client.get_statistic_by_id(item_id)
+        assert get_stats.status_code == 200, get_stats.text
+        stats_rows = get_stats.json()
+        _attach_json("e2e_statistic_response", stats_rows)
+        stat_found = any(
+            row.get("likes") == payload["statistics"]["likes"]
+            and row.get("viewCount") == payload["statistics"]["viewCount"]
+            and row.get("contacts") == payload["statistics"]["contacts"]
+            for row in stats_rows
+        )
+        assert stat_found
 
-    get_seller_items = api_client.get_items_by_seller(seller_id)
-    assert get_seller_items.status_code == 200, get_seller_items.text
-    seller_target = _find_by_id(get_seller_items.json(), item_id)
-    assert seller_target is not None
-    assert seller_target["name"] == payload["name"]
+    with allure.step("Проверить GET /api/1/:sellerID/item"):
+        get_seller_items = api_client.get_items_by_seller(seller_id)
+        assert get_seller_items.status_code == 200, get_seller_items.text
+        seller_items = get_seller_items.json()
+        _attach_json("e2e_get_by_seller_response", seller_items)
+        seller_target = _find_by_id(seller_items, item_id)
+        assert seller_target is not None
+        assert seller_target["name"] == payload["name"]
 
 @pytest.mark.e2e
 def test_e2e_2_bulk_seller_check(
