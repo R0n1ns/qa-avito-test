@@ -4,6 +4,8 @@
 
 Для просмотра отчета allure можно испольщовать файл allure-example.html (или index.html) в корне проекта, либо посмотреть его же по ссылке (в github pages) https://r0n1ns.github.io/qa-avito-test/
 
+Баги из первого задания в BUGS.md и задание 1.md, по второму заданию багов не нашёл 
+
 ## Стек 
 - Python 3.10+
 - `pytest`
