@@ -1,6 +1,4 @@
-# qa-avito-test
-
-Инструкция по запуску тестов для тестового задания QA Avito
+# Инструкция по запуску тестов для тестового задания QA Avito
 
 Для запуска тестов локально необходимо выполнить следующие ниже шаги (установить зависимости для python и запустить тесты ), либо запустить github actions workflow (тесты без allure) https://github.com/R0n1ns/qa-avito-test/actions/workflows/api-tests.yml
 
