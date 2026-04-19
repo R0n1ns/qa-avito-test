@@ -57,4 +57,3 @@ class AvitoApiClient:
     def create_item_without_content_type(self, payload: dict[str, Any]) -> requests.Response:
         raw_body = json.dumps(payload)
         return self.request("POST", "/api/1/item", data=raw_body)
-

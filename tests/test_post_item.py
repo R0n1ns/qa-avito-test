@@ -2,8 +2,9 @@ import datetime as dt
 import json
 import re
 import uuid
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable
+from typing import Any
 
 import allure
 import pytest
@@ -14,6 +15,7 @@ REQUIRED_TOP_LEVEL_FIELDS = {"id", "sellerId", "name", "price", "statistics", "c
 REQUIRED_STAT_FIELDS = {"likes", "viewCount", "contacts"}
 UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
+
 def _assert_create_schema(body: dict[str, Any]) -> None:
     assert REQUIRED_TOP_LEVEL_FIELDS.issubset(body.keys())
     assert isinstance(body["id"], str)
@@ -22,6 +24,7 @@ def _assert_create_schema(body: dict[str, Any]) -> None:
     assert isinstance(body["price"], int)
     assert isinstance(body["statistics"], dict)
     assert REQUIRED_STAT_FIELDS.issubset(body["statistics"].keys())
+
 
 def _parse_iso8601(value: str) -> dt.datetime:
     normalized = value.strip().replace("Z", "+00:00")
@@ -46,14 +49,17 @@ def _parse_iso8601(value: str) -> dt.datetime:
                 continue
         raise
 
+
 def _find_by_id(items: list[dict[str, Any]], item_id: str) -> dict[str, Any] | None:
     return next((item for item in items if item.get("id") == item_id), None)
+
 
 def _extract_id_from_create_response(body: dict[str, Any]) -> str:
     status_value = str(body.get("status", ""))
     match = UUID_RE.search(status_value)
     assert match is not None, f"Не удалось извлечь id из create ответа: {body}"
     return match.group(0)
+
 
 def _create_and_get_item(
     api_client: AvitoApiClient,
@@ -98,6 +104,7 @@ def test_1_1_1_create_valid_item(api_client: AvitoApiClient, item_payload_factor
     with allure.step("Проверить схему объекта объявления"):
         _assert_create_schema(item)
 
+
 def test_1_1_2_create_response_contract(api_client: AvitoApiClient, item_payload_factory: Callable[..., dict[str, Any]]) -> None:
     payload = item_payload_factory(price=1000, likes=1, view_count=10, contacts=1)
 
@@ -107,8 +114,9 @@ def test_1_1_2_create_response_contract(api_client: AvitoApiClient, item_payload
     assert isinstance(item["statistics"]["viewCount"], int)
     assert isinstance(item["statistics"]["contacts"], int)
 
+
 @pytest.mark.parametrize(
-    "seller_id, price, likes, views, contacts, expected_status",
+    ("seller_id", "price", "likes", "views", "contacts", "expected_status"),
     [
         (111111, 1, 1, 1, 1, 200),
         (999999, 1, 1, 1, 1, 200),
@@ -149,6 +157,7 @@ def test_1_1_3_boundaries(
         assert item["statistics"]["viewCount"] == views
         assert item["statistics"]["contacts"] == contacts
 
+
 def test_1_1_4_created_at_format_and_not_future(
     api_client: AvitoApiClient,
     item_payload_factory: Callable[..., dict[str, Any]],
@@ -157,14 +166,11 @@ def test_1_1_4_created_at_format_and_not_future(
 
     created_at = item["createdAt"]
     parsed = _parse_iso8601(created_at)
-    now_utc = dt.datetime.now(dt.timezone.utc)
-    parsed_utc = (
-        parsed.astimezone(dt.timezone.utc)
-        if parsed.tzinfo is not None
-        else parsed.replace(tzinfo=dt.timezone.utc)
-    )
+    now_utc = dt.datetime.now(dt.UTC)
+    parsed_utc = parsed.astimezone(dt.UTC) if parsed.tzinfo is not None else parsed.replace(tzinfo=dt.UTC)
     # Часы общего стенда и локальной машины могут отличаться на несколько секунд.
     assert parsed_utc <= now_utc + dt.timedelta(seconds=5)
+
 
 @pytest.mark.parametrize("missing_field", ["name", "sellerID", "price"])
 def test_1_2_1_missing_required_fields(
@@ -178,6 +184,7 @@ def test_1_2_1_missing_required_fields(
     response = api_client.create_item(payload)
 
     assert response.status_code == 400
+
 
 def test_1_2_2_missing_statistics_or_field(
     api_client: AvitoApiClient,
@@ -195,6 +202,7 @@ def test_1_2_2_missing_statistics_or_field(
     response_2 = api_client.create_item(payload_without_like)
     assert response_2.status_code == 400
 
+
 def test_1_2_3_content_type_validation(
     api_client: AvitoApiClient,
     item_payload_factory: Callable[..., dict[str, Any]],
@@ -208,19 +216,23 @@ def test_1_2_3_content_type_validation(
     assert wrong_content_type.status_code in {400, 415}
     assert no_content_type.status_code in {400, 415}
 
+
 def test_1_2_4_malformed_json(api_client: AvitoApiClient) -> None:
     response = api_client.create_item_with_raw_body('{"sellerID": 12345, "name": "bad"', content_type="application/json")
 
     assert response.status_code == 400
 
+
 def test_1_3_1_empty_name(api_client: AvitoApiClient, item_payload_factory: Callable[..., dict[str, Any]]) -> None:
     response = api_client.create_item(item_payload_factory(name=""))
     assert response.status_code == 400
+
 
 def test_1_3_2_too_long_name(api_client: AvitoApiClient, item_payload_factory: Callable[..., dict[str, Any]]) -> None:
     long_name = "x" * 5000
     response = api_client.create_item(item_payload_factory(name=long_name))
     assert response.status_code in {200, 400}
+
 
 @pytest.mark.parametrize("out_of_range", [111110, 1000000])
 def test_1_3_3_seller_out_of_range(
@@ -231,6 +243,7 @@ def test_1_3_3_seller_out_of_range(
     response = api_client.create_item(item_payload_factory(seller_id=out_of_range))
     assert response.status_code in {200, 400}
 
+
 def test_1_3_4_wrong_types(api_client: AvitoApiClient, item_payload_factory: Callable[..., dict[str, Any]]) -> None:
     payload = item_payload_factory()
     payload["price"] = "100"
@@ -239,11 +252,13 @@ def test_1_3_4_wrong_types(api_client: AvitoApiClient, item_payload_factory: Cal
     response = api_client.create_item(payload)
     assert response.status_code == 400
 
+
 def test_1_3_5_negative_values(api_client: AvitoApiClient, item_payload_factory: Callable[..., dict[str, Any]]) -> None:
     payload = item_payload_factory(price=-1, contacts=-10)
 
     response = api_client.create_item(payload)
     assert response.status_code in {200, 400}
+
 
 def test_1_3_6_integer_overflow(api_client: AvitoApiClient, item_payload_factory: Callable[..., dict[str, Any]]) -> None:
     payload = item_payload_factory(price=2**63)
@@ -251,12 +266,14 @@ def test_1_3_6_integer_overflow(api_client: AvitoApiClient, item_payload_factory
     response = api_client.create_item(payload)
     assert response.status_code == 400
 
+
 def test_1_3_7_injection_payload(api_client: AvitoApiClient, item_payload_factory: Callable[..., dict[str, Any]]) -> None:
     payload = item_payload_factory(name="<script>alert(1)</script>")
 
     response = api_client.create_item(payload)
 
     assert response.status_code in {200, 400}
+
 
 def test_1_4_1_non_idempotent_duplicate_posts(
     api_client: AvitoApiClient,
@@ -283,6 +300,7 @@ def test_1_4_1_non_idempotent_duplicate_posts(
         allure.attach(second_id, name="second_id", attachment_type=allure.attachment_type.TEXT)
         assert first_id != second_id
 
+
 def test_1_4_2_unique_ids_for_multiple_creates(
     api_client: AvitoApiClient,
     item_payload_factory: Callable[..., dict[str, Any]],
@@ -295,6 +313,7 @@ def test_1_4_2_unique_ids_for_multiple_creates(
 
     assert len(ids) == 10
 
+
 def test_1_4_3_extra_fields_are_ignored(api_client: AvitoApiClient, item_payload_factory: Callable[..., dict[str, Any]]) -> None:
     payload = item_payload_factory(price=1000, likes=1, view_count=10, contacts=1)
     payload["admin"] = True
@@ -303,6 +322,7 @@ def test_1_4_3_extra_fields_are_ignored(api_client: AvitoApiClient, item_payload
 
     assert item["id"] == item_id
     assert "admin" not in item
+
 
 def test_1_4_4_concurrent_create_race_condition(
     api_client: AvitoApiClient,
@@ -326,6 +346,7 @@ def test_1_4_4_concurrent_create_race_condition(
     assert statuses.count(200) == 5
     assert len(set(ids)) == 5
 
+
 def test_2_1_1_get_existing_item(api_client: AvitoApiClient, created_item: dict[str, Any]) -> None:
     item_id = created_item["id"]
 
@@ -338,6 +359,7 @@ def test_2_1_1_get_existing_item(api_client: AvitoApiClient, created_item: dict[
     matched = _find_by_id(body, item_id)
     assert matched is not None
     assert REQUIRED_TOP_LEVEL_FIELDS.issubset(matched.keys())
+
 
 @allure.title("2.1.2 Сквозная консистентность POST == GET")
 @allure.description("После создания объявления проверяем, что GET /item/:id возвращает те же данные.")
@@ -364,17 +386,21 @@ def test_2_1_2_post_get_consistency(api_client: AvitoApiClient, created_item: di
         assert target["sellerId"] == payload["sellerID"]
         assert target["statistics"] == payload["statistics"]
 
+
 def test_2_2_1_non_existing_id_returns_404(api_client: AvitoApiClient) -> None:
     response = api_client.get_item_by_id(str(uuid.uuid4()))
     assert response.status_code == 404
+
 
 def test_2_2_2_invalid_id_format(api_client: AvitoApiClient) -> None:
     response = api_client.get_item_by_id("!!!invalid-id###")
     assert response.status_code in {400, 404}
 
+
 def test_2_2_3_empty_id_path(api_client: AvitoApiClient) -> None:
     response = api_client.request("GET", "/api/1/item/")
     assert response.status_code == 404
+
 
 def test_3_1_1_get_items_by_seller_contains_created(
     api_client: AvitoApiClient,
@@ -397,6 +423,7 @@ def test_3_1_1_get_items_by_seller_contains_created(
     assert isinstance(items, list)
     returned_ids = {item["id"] for item in items}
     assert set(created_ids).issubset(returned_ids)
+
 
 def test_3_1_2_seller_list_consistency(
     api_client: AvitoApiClient,
@@ -424,14 +451,17 @@ def test_3_1_2_seller_list_consistency(
     assert target["price"] == payload["price"]
     assert target["statistics"] == payload["statistics"]
 
+
 def test_3_2_1_seller_without_items_returns_empty(api_client: AvitoApiClient, empty_seller_id: int) -> None:
     response = api_client.get_items_by_seller(empty_seller_id)
     assert response.status_code == 200, response.text
     assert response.json() == []
 
+
 def test_3_2_2_invalid_seller_id(api_client: AvitoApiClient) -> None:
     response = api_client.get_items_by_seller("abc")
     assert response.status_code == 400
+
 
 def test_4_1_1_statistic_contract(api_client: AvitoApiClient, created_item: dict[str, Any]) -> None:
     item_id = created_item["id"]
@@ -447,6 +477,7 @@ def test_4_1_1_statistic_contract(api_client: AvitoApiClient, created_item: dict
         assert isinstance(row["likes"], int)
         assert isinstance(row["viewCount"], int)
         assert isinstance(row["contacts"], int)
+
 
 @allure.title("4.1.2 Консистентность статистики")
 @allure.description("Проверяем, что хотя бы один элемент статистики совпадает с переданным при создании объявления.")
@@ -473,9 +504,11 @@ def test_4_1_2_statistic_consistency(api_client: AvitoApiClient, created_item: d
     with allure.step("Проверить совпадение ожидаемой статистики хотя бы в одном элементе"):
         assert found
 
+
 def test_4_2_1_statistic_non_existing_id(api_client: AvitoApiClient) -> None:
     response = api_client.get_statistic_by_id(str(uuid.uuid4()))
     assert response.status_code == 404
+
 
 @pytest.mark.e2e
 @allure.title("E2E-1 Полный жизненный цикл объявления")
@@ -534,6 +567,7 @@ def test_e2e_1_full_lifecycle(
         seller_target = _find_by_id(seller_items, item_id)
         assert seller_target is not None
         assert seller_target["name"] == payload["name"]
+
 
 @pytest.mark.e2e
 def test_e2e_2_bulk_seller_check(

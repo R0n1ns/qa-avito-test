@@ -52,3 +52,23 @@ pytest -v --alluredir=allure-results
 ```bat
 allure generate allure-results -o allure-report --clean --single-file
 ```
+
+## Линтер и форматтер тестового кода
+
+Для линтинга и форматирования используется `ruff` (включен в `requirements.txt`), который поддерживает как линтинг, так и автоформатирование кода. \
+Конфигурация ruff находится в файле `pyproject.toml`.
+
+### Проверка кода (lint)
+```bat
+ruff check .
+```
+
+### Автоисправление lint-проблем (где возможно)
+```bat
+ruff check . --fix
+```
+
+### Форматирование кода
+```bat
+ruff format .
+```
